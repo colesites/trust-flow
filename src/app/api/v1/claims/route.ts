@@ -1,0 +1,78 @@
+import { createClaim, listClaims } from "@/domains/claims/claim.repository";
+import {
+  claimCreateInputSchema,
+  claimListQuerySchema,
+} from "@/domains/claims/claim.schemas";
+import { authorizeRequest } from "@/lib/api/authz";
+import {
+  badRequest,
+  created,
+  success,
+  validationError,
+} from "@/lib/api/response";
+import { withApiRoute } from "@/lib/api/route";
+import { safeRevalidateTag } from "@/lib/cache/revalidate";
+
+export const GET = withApiRoute({
+  routeId: "v1.claims.list",
+  featureFlag: "claims_v1",
+  handler: async (request) => {
+    const authz = await authorizeRequest(request, "claims:view");
+
+    if (authz.response) {
+      return authz.response;
+    }
+
+    const searchParams = new URL(request.url).searchParams;
+    const parsedQuery = claimListQuerySchema.safeParse({
+      status: searchParams.get("status") ?? undefined,
+      limit: searchParams.get("limit") ?? undefined,
+    });
+
+    if (!parsedQuery.success) {
+      return validationError(parsedQuery.error);
+    }
+
+    const claims = listClaims(authz.context.organizationId, parsedQuery.data);
+
+    return success({
+      items: claims,
+      total: claims.length,
+    });
+  },
+});
+
+export const POST = withApiRoute({
+  routeId: "v1.claims.create",
+  featureFlag: "claims_v1",
+  handler: async (request) => {
+    const authz = await authorizeRequest(request, "claims:create");
+
+    if (authz.response) {
+      return authz.response;
+    }
+
+    const payload = await request.json().catch(() => null);
+
+    if (!payload) {
+      return badRequest("Request body must be valid JSON");
+    }
+
+    const parsed = claimCreateInputSchema.safeParse(payload);
+
+    if (!parsed.success) {
+      return validationError(parsed.error);
+    }
+
+    const claim = createClaim(
+      authz.context.organizationId,
+      authz.context.userId,
+      parsed.data,
+    );
+
+    safeRevalidateTag("trustflow-home", "max");
+    safeRevalidateTag(`dashboard:${authz.context.organizationId}`, "max");
+
+    return created(claim);
+  },
+});

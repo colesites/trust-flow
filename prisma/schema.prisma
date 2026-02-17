@@ -1,0 +1,580 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  CUSTOMER
+  AGENT
+  ADJUSTER
+  UNDERWRITER
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum PolicyStatus {
+  DRAFT
+  ACTIVE
+  LAPSED
+  CANCELLED
+  EXPIRED
+}
+
+enum QuoteStatus {
+  DRAFT
+  PRESENTED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  VALIDATING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+  PAID
+  CLOSED
+}
+
+enum PayoutStatus {
+  QUEUED
+  PROCESSING
+  PAID
+  FAILED
+  REVERSED
+}
+
+enum UnderwritingStatus {
+  INTAKE
+  RISK_CHECK
+  PRICING
+  APPROVED
+  DECLINED
+  REFERRED
+}
+
+enum DecisionResult {
+  APPROVE
+  DECLINE
+  REFER
+}
+
+enum KYCStatus {
+  PENDING
+  IN_REVIEW
+  VERIFIED
+  REJECTED
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  PUSH
+  IN_APP
+}
+
+enum NotificationStatus {
+  QUEUED
+  SENT
+  FAILED
+  READ
+}
+
+enum ThreadStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  CLOSED
+}
+
+enum MessageKind {
+  CUSTOMER
+  AGENT
+  SYSTEM
+}
+
+model Organization {
+  id                String             @id @default(cuid())
+  slug              String             @unique
+  name              String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  memberships       Membership[]
+  products          Product[]
+  policies          Policy[]
+  quotes            Quote[]
+  claims            Claim[]
+  underwritingCases UnderwritingCase[]
+  kycProfiles       KYCProfile[]
+  notifications     Notification[]
+  messageThreads    MessageThread[]
+  auditLogs         AuditLog[]
+  featureFlags      FeatureFlag[]
+
+  @@index([slug])
+  @@index([createdAt])
+}
+
+model User {
+  id                   String              @id @default(cuid())
+  name                 String
+  email                String              @unique
+  emailVerified        Boolean             @default(false)
+  image                String?
+  role                 UserRole            @default(CUSTOMER)
+  activeOrganizationId String?
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  memberships          Membership[]
+  accounts             Account[]
+  sessions             Session[]
+  claimsAsClaimant     Claim[]             @relation("ClaimantClaims")
+  claimEvents          ClaimEvent[]        @relation("ClaimEventsActor")
+  claimDocuments       ClaimDocument[]     @relation("ClaimDocumentsUploader")
+  underwritingCases    UnderwritingCase[]  @relation("UnderwritingApplicant")
+  underwritingDecisions Decision[]         @relation("UnderwritingDecider")
+  payouts              Payout[]            @relation("PayoutInitiator")
+  kycProfiles          KYCProfile[]
+  notifications        Notification[]
+  messageThreadsAsCustomer MessageThread[] @relation("CustomerThreads")
+  messageThreadsAsAssignee MessageThread[] @relation("AssignedThreads")
+  messages             Message[]           @relation("MessageSender")
+  auditLogs            AuditLog[]          @relation("AuditActor")
+  policies             Policy[]            @relation("PolicyCustomer")
+  quotes               Quote[]             @relation("QuoteCustomer")
+
+  @@index([role])
+  @@index([activeOrganizationId])
+  @@index([createdAt])
+}
+
+model Membership {
+  id             String       @id @default(cuid())
+  userId         String
+  organizationId String
+  role           UserRole
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+  @@index([createdAt])
+}
+
+model Product {
+  id             String       @id @default(cuid())
+  organizationId String
+  code           String
+  name           String
+  description    String?
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policies       Policy[]
+  quotes         Quote[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, active])
+}
+
+model Policy {
+  id             String       @id @default(cuid())
+  organizationId String
+  productId      String
+  customerId     String
+  policyNumber   String
+  status         PolicyStatus @default(DRAFT)
+  premium        Decimal?     @db.Decimal(12, 2)
+  currency       String       @default("USD")
+  effectiveFrom  DateTime?
+  effectiveTo    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  customer       User         @relation("PolicyCustomer", fields: [customerId], references: [id], onDelete: Restrict)
+  claims         Claim[]
+  underwritingCases UnderwritingCase[]
+
+  @@unique([organizationId, policyNumber])
+  @@index([organizationId, customerId, status])
+  @@index([createdAt])
+}
+
+model Quote {
+  id             String       @id @default(cuid())
+  organizationId String
+  productId      String
+  customerId     String?
+  status         QuoteStatus  @default(DRAFT)
+  premiumQuoted  Decimal?     @db.Decimal(12, 2)
+  currency       String       @default("USD")
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  product        Product      @relation(fields: [productId], references: [id], onDelete: Restrict)
+  customer       User?        @relation("QuoteCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status])
+  @@index([customerId])
+}
+
+model Claim {
+  id             String        @id @default(cuid())
+  organizationId String
+  policyId       String
+  claimantId     String
+  claimType      String
+  description    String
+  status         ClaimStatus   @default(SUBMITTED)
+  incidentDate   DateTime
+  submittedAt    DateTime      @default(now())
+  closedAt       DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policy         Policy        @relation(fields: [policyId], references: [id], onDelete: Restrict)
+  claimant       User          @relation("ClaimantClaims", fields: [claimantId], references: [id], onDelete: Restrict)
+  events         ClaimEvent[]
+  documents      ClaimDocument[]
+  payouts        Payout[]
+
+  @@index([organizationId, status, createdAt])
+  @@index([claimantId, createdAt])
+  @@index([policyId, createdAt])
+}
+
+model ClaimEvent {
+  id             String      @id @default(cuid())
+  claimId        String
+  actorId        String?
+  fromStatus     ClaimStatus?
+  toStatus       ClaimStatus
+  eventType      String
+  notes          String?
+  createdAt      DateTime    @default(now())
+
+  claim          Claim       @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  actor          User?       @relation("ClaimEventsActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([claimId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model ClaimDocument {
+  id             String      @id @default(cuid())
+  claimId        String
+  uploaderId     String?
+  documentType   String
+  storageKey     String
+  checksum       String
+  metadata       Json?
+  createdAt      DateTime    @default(now())
+
+  claim          Claim       @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  uploader       User?       @relation("ClaimDocumentsUploader", fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([claimId, createdAt])
+  @@index([checksum])
+}
+
+model Payout {
+  id             String       @id @default(cuid())
+  claimId        String
+  initiatedById  String?
+  amount         Decimal      @db.Decimal(12, 2)
+  currency       String       @default("USD")
+  status         PayoutStatus @default(QUEUED)
+  initiatedAt    DateTime     @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+
+  claim          Claim        @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  initiatedBy    User?        @relation("PayoutInitiator", fields: [initiatedById], references: [id], onDelete: SetNull)
+
+  @@index([claimId, status])
+  @@index([initiatedAt])
+}
+
+model UnderwritingCase {
+  id             String             @id @default(cuid())
+  organizationId String
+  policyId       String?
+  applicantId    String?
+  status         UnderwritingStatus @default(INTAKE)
+  riskScore      Int?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  policy         Policy?            @relation(fields: [policyId], references: [id], onDelete: SetNull)
+  applicant      User?              @relation("UnderwritingApplicant", fields: [applicantId], references: [id], onDelete: SetNull)
+  riskSignals    RiskSignal[]
+  pricingFactors PricingFactor[]
+  decision       Decision?
+
+  @@index([organizationId, status, createdAt])
+  @@index([applicantId, createdAt])
+}
+
+model RiskSignal {
+  id             String           @id @default(cuid())
+  caseId         String
+  kind           String
+  score          Float
+  details        Json?
+  createdAt      DateTime         @default(now())
+
+  underwritingCase UnderwritingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, kind])
+}
+
+model PricingFactor {
+  id             String           @id @default(cuid())
+  caseId         String
+  factorKey      String
+  weight         Float
+  value          String
+  notes          String?
+  createdAt      DateTime         @default(now())
+
+  underwritingCase UnderwritingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([caseId, factorKey])
+}
+
+model Decision {
+  id             String           @id @default(cuid())
+  caseId         String           @unique
+  decidedById    String?
+  result         DecisionResult
+  summary        String
+  rationale      Json?
+  decidedAt      DateTime         @default(now())
+  createdAt      DateTime         @default(now())
+
+  underwritingCase UnderwritingCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  decidedBy      User?            @relation("UnderwritingDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([decidedAt])
+}
+
+model KYCProfile {
+  id             String       @id @default(cuid())
+  organizationId String
+  userId         String
+  status         KYCStatus    @default(PENDING)
+  riskLevel      String?
+  startedAt      DateTime     @default(now())
+  completedAt    DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checks         KYCCheck[]
+  documents      KYCDocument[]
+  sessions       VerificationSession[]
+
+  @@unique([organizationId, userId])
+  @@index([organizationId, status])
+}
+
+model KYCCheck {
+  id             String       @id @default(cuid())
+  profileId      String
+  provider       String
+  result         KYCStatus
+  referenceId    String?
+  requestedAt    DateTime     @default(now())
+  completedAt    DateTime?
+  rawPayload     Json?
+
+  profile        KYCProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, requestedAt])
+  @@index([provider, result])
+}
+
+model KYCDocument {
+  id             String       @id @default(cuid())
+  profileId      String
+  documentType   String
+  storageKey     String
+  checksum       String
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  profile        KYCProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, createdAt])
+  @@index([checksum])
+}
+
+model VerificationSession {
+  id                String       @id @default(cuid())
+  profileId         String
+  provider          String
+  externalSessionId String
+  status            KYCStatus    @default(PENDING)
+  startedAt         DateTime     @default(now())
+  expiresAt         DateTime?
+  finishedAt        DateTime?
+
+  profile           KYCProfile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalSessionId])
+  @@index([profileId, startedAt])
+}
+
+model Notification {
+  id             String             @id @default(cuid())
+  organizationId String
+  userId         String?
+  channel        NotificationChannel
+  status         NotificationStatus @default(QUEUED)
+  title          String
+  message        String
+  createdAt      DateTime           @default(now())
+  sentAt         DateTime?
+
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt])
+  @@index([userId, createdAt])
+}
+
+model MessageThread {
+  id             String       @id @default(cuid())
+  organizationId String
+  subject        String
+  status         ThreadStatus @default(OPEN)
+  customerId     String?
+  assignedToId   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer       User?        @relation("CustomerThreads", fields: [customerId], references: [id], onDelete: SetNull)
+  assignedTo     User?        @relation("AssignedThreads", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages       Message[]
+
+  @@index([organizationId, status, updatedAt])
+  @@index([customerId])
+}
+
+model Message {
+  id             String       @id @default(cuid())
+  threadId       String
+  senderId       String?
+  kind           MessageKind  @default(CUSTOMER)
+  body           String
+  createdAt      DateTime     @default(now())
+
+  thread         MessageThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  sender         User?         @relation("MessageSender", fields: [senderId], references: [id], onDelete: SetNull)
+
+  @@index([threadId, createdAt])
+}
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  actorId        String?
+  action         String
+  resourceType   String
+  resourceId     String
+  reason         String?
+  ipAddress      String?
+  userAgent      String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actor          User?        @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([resourceType, resourceId])
+  @@index([action, createdAt])
+}
+
+model FeatureFlag {
+  id             String       @id @default(cuid())
+  organizationId String
+  key            String
+  description    String?
+  enabled        Boolean      @default(false)
+  rules          Json?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, key])
+  @@index([organizationId, enabled])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  token      String   @unique
+  userId     String
+  expiresAt  DateTime
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model Account {
+  id                     String    @id @default(cuid())
+  accountId              String
+  providerId             String
+  userId                 String
+  accessToken            String?
+  refreshToken           String?
+  idToken                String?
+  accessTokenExpiresAt   DateTime?
+  refreshTokenExpiresAt  DateTime?
+  scope                  String?
+  password               String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  user                   User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
