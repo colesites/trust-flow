@@ -16,3 +16,15 @@ export function isAppRole(value: string | null | undefined): value is AppRole {
 
   return APP_ROLES.includes(value as AppRole);
 }
+
+export function normalizeAppRole(
+  value: string | null | undefined,
+): AppRole | null {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.toLowerCase();
+
+  return isAppRole(normalized) ? normalized : null;
+}

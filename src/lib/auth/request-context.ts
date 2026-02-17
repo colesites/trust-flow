@@ -1,6 +1,6 @@
 import { resolveOrganizationId } from "@/lib/auth/organization";
 import type { AppRole } from "@/lib/auth/roles";
-import { isAppRole } from "@/lib/auth/roles";
+import { isAppRole, normalizeAppRole } from "@/lib/auth/roles";
 import { auth } from "@/lib/auth/server";
 
 export type RequestAuthContext = {
@@ -52,10 +52,11 @@ export async function getRequestAuthContext(
     typeof userRecord.activeOrganizationId === "string"
       ? userRecord.activeOrganizationId
       : null;
+  const role = normalizeAppRole(rawRole);
 
   return {
     userId: session.user.id,
-    role: isAppRole(rawRole) ? rawRole : "customer",
+    role: role ?? "customer",
     organizationId: resolveOrganizationId(rawOrganizationId, session.user.id),
   };
 }

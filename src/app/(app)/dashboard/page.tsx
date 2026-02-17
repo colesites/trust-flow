@@ -1,6 +1,7 @@
 import { AlertTriangle, FileCheck2, Shield, Wallet } from "lucide-react";
 import { cacheLife, cacheTag } from "next/cache";
 import Link from "next/link";
+import { Suspense } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import {
@@ -32,6 +33,10 @@ type DashboardSnapshot = {
   quotes: ReturnType<typeof countQuotesByStatus>;
 };
 
+type DashboardSectionProps = {
+  organizationId: string;
+};
+
 async function getDashboardSnapshot(
   organizationId: string,
 ): Promise<DashboardSnapshot> {
@@ -47,6 +52,360 @@ async function getDashboardSnapshot(
   };
 }
 
+async function getRecentClaims(organizationId: string) {
+  "use cache: private";
+
+  cacheLife("minutes");
+  cacheTag(`dashboard:${organizationId}`);
+
+  return listClaims(organizationId, { limit: 5 });
+}
+
+async function getRecentUnderwritingCases(organizationId: string) {
+  "use cache: private";
+
+  cacheLife("minutes");
+  cacheTag(`dashboard:${organizationId}`);
+
+  return listUnderwritingCases(organizationId, { limit: 5 });
+}
+
+async function getRecentQuotes(organizationId: string) {
+  "use cache: private";
+
+  cacheLife("minutes");
+  cacheTag(`dashboard:${organizationId}`);
+
+  return listQuotes(organizationId, { limit: 5 });
+}
+
+async function getRecentKycSessions(organizationId: string) {
+  "use cache: private";
+
+  cacheLife("minutes");
+  cacheTag(`dashboard:${organizationId}`);
+
+  return listKycSessions(organizationId, 3);
+}
+
+function DashboardIntroSection() {
+  return (
+    <section className="grid gap-3">
+      <Badge variant="success" className="w-fit">
+        TrustFlow Dashboard
+      </Badge>
+      <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+        Operations overview
+      </h1>
+      <p className="text-muted-foreground">
+        Monitor claims, underwriting, and customer verification without context
+        switching.
+      </p>
+    </section>
+  );
+}
+
+function DashboardStatsFallback() {
+  const skeletonIds = ["claims", "underwriting", "quotes", "kyc"] as const;
+
+  return (
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {skeletonIds.map((id) => (
+        <Card key={`stats-skeleton-${id}`}>
+          <CardHeader>
+            <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+            <div className="h-7 w-16 animate-pulse rounded bg-muted" />
+          </CardHeader>
+          <CardContent>
+            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+          </CardContent>
+        </Card>
+      ))}
+    </section>
+  );
+}
+
+async function DashboardStatsSection({
+  organizationId,
+}: DashboardSectionProps) {
+  const [snapshot, kycSessions] = await Promise.all([
+    getDashboardSnapshot(organizationId),
+    getRecentKycSessions(organizationId),
+  ]);
+
+  return (
+    <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Card>
+        <CardHeader>
+          <CardDescription>Claims submitted</CardDescription>
+          <CardTitle>{snapshot.claims.submitted}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          {snapshot.claims.validating} currently validating.
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardDescription>Underwriting in pricing</CardDescription>
+          <CardTitle>{snapshot.underwriting.pricing}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          {snapshot.underwriting.referred} referred for manual review.
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardDescription>Quotes presented</CardDescription>
+          <CardTitle>{snapshot.quotes.presented}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          {snapshot.quotes.accepted} accepted this cycle.
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardDescription>KYC sessions active</CardDescription>
+          <CardTitle>{kycSessions.length}</CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          Verification windows stay open for 30 minutes.
+        </CardContent>
+      </Card>
+    </section>
+  );
+}
+
+function ClaimsCardFallback() {
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileCheck2 className="size-5 text-primary" />
+          Recent claim activity
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {["a", "b", "c"].map((id) => (
+          <div
+            className="h-20 animate-pulse rounded-2xl border border-border bg-muted"
+            key={`claim-skeleton-${id}`}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function ClaimsCardSection({ organizationId }: DashboardSectionProps) {
+  const recentClaims = await getRecentClaims(organizationId);
+
+  return (
+    <Card className="lg:col-span-2">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <FileCheck2 className="size-5 text-primary" />
+          Recent claim activity
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {recentClaims.length > 0 ? (
+          recentClaims.map((claim) => (
+            <div
+              className="rounded-2xl border border-border bg-surface p-3"
+              key={claim.id}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium text-foreground">{claim.claimType}</p>
+                <Badge variant="neutral">{claim.status}</Badge>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {claim.description.slice(0, 120)}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">No claims yet.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function KycQueueFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Shield className="size-5 text-primary" />
+          KYC queue
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {["a", "b"].map((id) => (
+          <div
+            className="h-16 animate-pulse rounded-2xl border border-border bg-muted"
+            key={`kyc-skeleton-${id}`}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function KycQueueSection({ organizationId }: DashboardSectionProps) {
+  const kycSessions = await getRecentKycSessions(organizationId);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Shield className="size-5 text-primary" />
+          KYC queue
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {kycSessions.length > 0 ? (
+          kycSessions.map((sessionItem) => (
+            <div
+              className="rounded-2xl border border-border bg-surface p-3"
+              key={sessionItem.id}
+            >
+              <p className="font-medium text-foreground">
+                {sessionItem.documentType}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                Provider: {sessionItem.provider}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No active verification sessions.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function UnderwritingFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <AlertTriangle className="size-5 text-primary" />
+          Underwriting cases
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {["a", "b", "c"].map((id) => (
+          <div
+            className="h-16 animate-pulse rounded-2xl border border-border bg-muted"
+            key={`uw-skeleton-${id}`}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function UnderwritingSection({ organizationId }: DashboardSectionProps) {
+  const recentCases = await getRecentUnderwritingCases(organizationId);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <AlertTriangle className="size-5 text-primary" />
+          Underwriting cases
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {recentCases.length > 0 ? (
+          recentCases.map((caseItem) => (
+            <div
+              className="rounded-2xl border border-border bg-surface p-3"
+              key={caseItem.id}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium text-foreground">
+                  {caseItem.productCode}
+                </p>
+                <Badge variant="neutral">{caseItem.status}</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Risk score: {caseItem.riskScore}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            No underwriting cases yet.
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function QuotesFallback() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Wallet className="size-5 text-primary" />
+          Distribution quotes
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {["a", "b", "c"].map((id) => (
+          <div
+            className="h-16 animate-pulse rounded-2xl border border-border bg-muted"
+            key={`quote-skeleton-${id}`}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+async function QuotesSection({ organizationId }: DashboardSectionProps) {
+  const recentQuotes = await getRecentQuotes(organizationId);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Wallet className="size-5 text-primary" />
+          Distribution quotes
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-3">
+        {recentQuotes.length > 0 ? (
+          recentQuotes.map((quote) => (
+            <div
+              className="rounded-2xl border border-border bg-surface p-3"
+              key={quote.id}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="font-medium text-foreground">
+                  {quote.productCode}
+                </p>
+                <Badge variant="neutral">{quote.status}</Badge>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                ${(quote.premiumCents / 100).toFixed(2)} {quote.currency}
+              </p>
+            </div>
+          ))
+        ) : (
+          <p className="text-sm text-muted-foreground">No quotes yet.</p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default async function DashboardPage() {
   const session = await requireServerSession("/dashboard");
   const userRecord = session.user as Record<string, unknown>;
@@ -59,196 +418,32 @@ export default async function DashboardPage() {
     session.user.id,
   );
 
-  const [snapshot, recentClaims, recentCases, recentQuotes, kycSessions] =
-    await Promise.all([
-      getDashboardSnapshot(organizationId),
-      Promise.resolve(listClaims(organizationId, { limit: 5 })),
-      Promise.resolve(listUnderwritingCases(organizationId, { limit: 5 })),
-      Promise.resolve(listQuotes(organizationId, { limit: 5 })),
-      Promise.resolve(listKycSessions(organizationId, 3)),
-    ]);
-
   return (
     <div className="grid gap-6">
-      <section className="grid gap-3">
-        <Badge variant="success" className="w-fit">
-          TrustFlow Dashboard
-        </Badge>
-        <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-          Operations overview
-        </h1>
-        <p className="text-muted-foreground">
-          Monitor claims, underwriting, and customer verification without
-          context switching.
-        </p>
-      </section>
+      <DashboardIntroSection />
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card>
-          <CardHeader>
-            <CardDescription>Claims submitted</CardDescription>
-            <CardTitle>{snapshot.claims.submitted}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {snapshot.claims.validating} currently validating.
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Underwriting in pricing</CardDescription>
-            <CardTitle>{snapshot.underwriting.pricing}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {snapshot.underwriting.referred} referred for manual review.
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>Quotes presented</CardDescription>
-            <CardTitle>{snapshot.quotes.presented}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            {snapshot.quotes.accepted} accepted this cycle.
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardDescription>KYC sessions active</CardDescription>
-            <CardTitle>{kycSessions.length}</CardTitle>
-          </CardHeader>
-          <CardContent className="text-sm text-muted-foreground">
-            Verification windows stay open for 30 minutes.
-          </CardContent>
-        </Card>
-      </section>
+      <Suspense fallback={<DashboardStatsFallback />}>
+        <DashboardStatsSection organizationId={organizationId} />
+      </Suspense>
 
       <section className="grid gap-4 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileCheck2 className="size-5 text-primary" />
-              Recent claim activity
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {recentClaims.length > 0 ? (
-              recentClaims.map((claim) => (
-                <div
-                  className="rounded-2xl border border-border bg-surface p-3"
-                  key={claim.id}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-foreground">
-                      {claim.claimType}
-                    </p>
-                    <Badge variant="neutral">{claim.status}</Badge>
-                  </div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {claim.description.slice(0, 120)}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No claims yet.</p>
-            )}
-          </CardContent>
-        </Card>
+        <Suspense fallback={<ClaimsCardFallback />}>
+          <ClaimsCardSection organizationId={organizationId} />
+        </Suspense>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Shield className="size-5 text-primary" />
-              KYC queue
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {kycSessions.length > 0 ? (
-              kycSessions.map((sessionItem) => (
-                <div
-                  className="rounded-2xl border border-border bg-surface p-3"
-                  key={sessionItem.id}
-                >
-                  <p className="font-medium text-foreground">
-                    {sessionItem.documentType}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Provider: {sessionItem.provider}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No active verification sessions.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <Suspense fallback={<KycQueueFallback />}>
+          <KycQueueSection organizationId={organizationId} />
+        </Suspense>
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <AlertTriangle className="size-5 text-primary" />
-              Underwriting cases
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {recentCases.length > 0 ? (
-              recentCases.map((caseItem) => (
-                <div
-                  className="rounded-2xl border border-border bg-surface p-3"
-                  key={caseItem.id}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-foreground">
-                      {caseItem.productCode}
-                    </p>
-                    <Badge variant="neutral">{caseItem.status}</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Risk score: {caseItem.riskScore}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                No underwriting cases yet.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        <Suspense fallback={<UnderwritingFallback />}>
+          <UnderwritingSection organizationId={organizationId} />
+        </Suspense>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Wallet className="size-5 text-primary" />
-              Distribution quotes
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-3">
-            {recentQuotes.length > 0 ? (
-              recentQuotes.map((quote) => (
-                <div
-                  className="rounded-2xl border border-border bg-surface p-3"
-                  key={quote.id}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-medium text-foreground">
-                      {quote.productCode}
-                    </p>
-                    <Badge variant="neutral">{quote.status}</Badge>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    ${(quote.premiumCents / 100).toFixed(2)} {quote.currency}
-                  </p>
-                </div>
-              ))
-            ) : (
-              <p className="text-sm text-muted-foreground">No quotes yet.</p>
-            )}
-          </CardContent>
-        </Card>
+        <Suspense fallback={<QuotesFallback />}>
+          <QuotesSection organizationId={organizationId} />
+        </Suspense>
       </section>
 
       <section className="flex flex-wrap items-center gap-4 text-sm">

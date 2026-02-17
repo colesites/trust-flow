@@ -16,6 +16,7 @@
   "dependencies": {
     "@ai-sdk/gateway": "^3.0.46",
     "@ai-sdk/openai": "^3.0.29",
+    "@prisma/adapter-pg": "^7.4.0",
     "@prisma/client": "^7.4.0",
     "ai": "^6.0.86",
     "better-auth": "^1.4.18",
@@ -23,6 +24,7 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.564.0",
     "next": "16.1.6",
+    "pg": "^8.18.0",
     "prisma": "^7.4.0",
     "radix-ui": "^1.4.3",
     "react": "19.2.3",
@@ -34,6 +36,7 @@
     "@biomejs/biome": "2.2.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.16.0",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
